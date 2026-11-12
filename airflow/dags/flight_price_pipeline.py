@@ -183,6 +183,63 @@ def transform_data():
     print(report)
     return report
 
+def compute_kpis():
+    hook = MySqlHook(mysql_conn_id=MYSQL_CONN_ID)
+    df = hook.get_df(
+        f"SELECT airline, route, source, destination, seasonality, "
+        f"season_type, total_fare FROM {ENRICHED_TABLE}"
+    )
+    df["total_fare"] = df["total_fare"].astype("float64")
+
+    # KPI 1: average fare by airline
+    avg_fare = (
+        df.groupby("airline", as_index=False)["total_fare"].mean()
+        .rename(columns={"total_fare": "avg_total_fare"})
+    )
+    avg_fare["avg_total_fare"] = avg_fare["avg_total_fare"].round(2)
+    avg_fare = avg_fare.sort_values("avg_total_fare", ascending=False)
+
+    # KPI 2: seasonal fare variation (peak vs non-peak)
+    seasonal = df.groupby(["season_type", "seasonality"], as_index=False).agg(
+        avg_total_fare=("total_fare", "mean"),
+        booking_count=("total_fare", "size"),
+    )
+    baseline = df.loc[df["season_type"] == "Non-Peak", "total_fare"].mean()
+    seasonal["pct_vs_non_peak"] = (
+        (seasonal["avg_total_fare"] - baseline) / baseline * 100
+    ).round(2)
+    seasonal["avg_total_fare"] = seasonal["avg_total_fare"].round(2)
+
+    # KPI 3: booking count by airline
+    bookings = (
+        df.groupby("airline", as_index=False).size()
+        .rename(columns={"size": "booking_count"})
+        .sort_values("booking_count", ascending=False)
+    )
+
+    # KPI 4: most popular routes (top 20)
+    routes = (
+        df.groupby(["route", "source", "destination"], as_index=False).size()
+        .rename(columns={"size": "booking_count"})
+        .sort_values("booking_count", ascending=False)
+        .head(20)
+    )
+    routes.insert(0, "rank", range(1, len(routes) + 1))
+
+    kpis = {
+        "kpi_avg_fare_by_airline": avg_fare,
+        "kpi_seasonal_fare_variation": seasonal,
+        "kpi_booking_count_by_airline": bookings,
+        "kpi_popular_routes": routes,
+    }
+    engine = hook.get_sqlalchemy_engine()
+    for name, frame in kpis.items():
+        frame.to_sql(name, engine, if_exists="replace", index=False)
+
+    report = {name: len(frame) for name, frame in kpis.items()}
+    print(report)
+    return report
+
 with DAG(
     dag_id="flight_price_pipeline",
     start_date=datetime(2026, 1, 1),
@@ -205,4 +262,9 @@ with DAG(
         python_callable=transform_data,
     )
 
-    ingest >> validate >> transform
+    kpis = PythonOperator(
+        task_id="compute_kpis",
+        python_callable=compute_kpis,
+    )
+
+    ingest >> validate >> transform >> kpis
