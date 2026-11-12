@@ -60,6 +60,9 @@ REQUIRED_COLUMNS = ["airline", "source", "destination", "base_fare", "tax_surcha
 TEXT_COLS = ["airline", "source", "destination"]
 FARE_COLS = ["base_fare", "tax_surcharge", "total_fare"]
 
+ENRICHED_TABLE = "enriched_flights"
+PEAK_SEASONS = ["Eid", "Hajj", "Winter Holidays"]
+
 
 def ingest_csv_to_mysql():
     df = pd.read_csv(CSV_PATH)
@@ -139,6 +142,47 @@ def validate_data():
     print(report)
     return report
 
+def transform_data():
+    hook = MySqlHook(mysql_conn_id=MYSQL_CONN_ID)
+    df = hook.get_df(f"SELECT * FROM {VALIDATED_TABLE}")
+
+    for c in FARE_COLS + ["duration_hrs"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").astype("float64")
+
+    # total fare = base fare + tax, only if it is missing
+    df["total_fare"] = df["total_fare"].fillna(df["base_fare"] + df["tax_surcharge"])
+
+    # new columns for the KPIs
+    df["route"] = df["source"] + " - " + df["destination"]
+    df["season_type"] = df["seasonality"].isin(PEAK_SEASONS).map(
+        {True: "Peak", False: "Non-Peak"}
+    )
+
+    hook.run(f"DROP TABLE IF EXISTS {ENRICHED_TABLE}")
+    hook.run(f"CREATE TABLE {ENRICHED_TABLE} LIKE {VALIDATED_TABLE}")
+    hook.run(
+        f"ALTER TABLE {ENRICHED_TABLE} "
+        "ADD COLUMN route VARCHAR(25), ADD COLUMN season_type VARCHAR(15)"
+    )
+
+    engine = hook.get_sqlalchemy_engine()
+    df.to_sql(
+        ENRICHED_TABLE, engine, if_exists="append",
+        index=False, chunksize=2000, method="multi",
+    )
+
+    saved = hook.get_first(f"SELECT COUNT(*) FROM {ENRICHED_TABLE}")[0]
+    if saved != len(df):
+        raise ValueError(f"Row mismatch: expected {len(df)}, saved {saved}")
+
+    report = {
+        "rows": int(saved),
+        "peak": int((df["season_type"] == "Peak").sum()),
+        "non_peak": int((df["season_type"] == "Non-Peak").sum()),
+    }
+    print(report)
+    return report
+
 with DAG(
     dag_id="flight_price_pipeline",
     start_date=datetime(2026, 1, 1),
@@ -156,4 +200,9 @@ with DAG(
         python_callable=validate_data,
     )
 
-    ingest >> validate
+    transform = PythonOperator(
+        task_id="transform_data",
+        python_callable=transform_data,
+    )
+
+    ingest >> validate >> transform
