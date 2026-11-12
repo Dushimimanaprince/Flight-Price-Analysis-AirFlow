@@ -55,6 +55,10 @@ CREATE TABLE {STAGING_TABLE} (
     days_before_departure INT
 )
 """
+VALIDATED_TABLE = "validated_flights"
+REQUIRED_COLUMNS = ["airline", "source", "destination", "base_fare", "tax_surcharge", "total_fare"]
+TEXT_COLS = ["airline", "source", "destination"]
+FARE_COLS = ["base_fare", "tax_surcharge", "total_fare"]
 
 
 def ingest_csv_to_mysql():
@@ -79,14 +83,77 @@ def ingest_csv_to_mysql():
     return loaded
 
 
+def validate_data():
+    hook = MySqlHook(mysql_conn_id=MYSQL_CONN_ID)
+    df = hook.get_df(f"SELECT * FROM {STAGING_TABLE}")
+    report = {"rows_in": len(df)}
+
+    # 1. required columns must exist
+    missing_cols = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+
+    # 2. fix types and clean text
+    for c in FARE_COLS:
+        df[c] = pd.to_numeric(df[c], errors="coerce").astype("float64")
+    df["duration_hrs"] = pd.to_numeric(df["duration_hrs"], errors="coerce").astype("float64")
+    for c in TEXT_COLS:
+        df[c] = df[c].str.strip()
+    df["source"] = df["source"].str.upper()
+    df["destination"] = df["destination"].str.upper()
+
+    # 3. find bad rows
+    missing_mask = df[TEXT_COLS + FARE_COLS].isna().any(axis=1) | (df[TEXT_COLS] == "").any(axis=1)
+    negative_mask = (df[FARE_COLS] < 0).any(axis=1)
+    city_mask = (
+        ~df["source"].str.fullmatch(r"[A-Z]{3}", na=False)
+        | ~df["destination"].str.fullmatch(r"[A-Z]{3}", na=False)
+        | (df["source"] == df["destination"])
+    )
+    bad_mask = missing_mask | negative_mask | city_mask
+    report["dropped_missing"] = int(missing_mask.sum())
+    report["dropped_negative_fare"] = int(negative_mask.sum())
+    report["dropped_invalid_city"] = int(city_mask.sum())
+
+    good = df[~bad_mask].copy()
+
+    # 4. correct total fare where it does not equal base fare + tax
+    expected = (good["base_fare"] + good["tax_surcharge"]).round(2)
+    mismatch = (good["total_fare"] - expected).abs() > 0.01
+    report["total_fare_corrected"] = int(mismatch.sum())
+    good.loc[mismatch, "total_fare"] = expected[mismatch]
+
+    # 5. write to a separate table, keep staging untouched
+    hook.run(f"DROP TABLE IF EXISTS {VALIDATED_TABLE}")
+    hook.run(f"CREATE TABLE {VALIDATED_TABLE} LIKE {STAGING_TABLE}")
+    engine = hook.get_sqlalchemy_engine()
+    good.to_sql(
+        VALIDATED_TABLE, engine, if_exists="append",
+        index=False, chunksize=2000, method="multi",
+    )
+
+    saved = hook.get_first(f"SELECT COUNT(*) FROM {VALIDATED_TABLE}")[0]
+    if saved != len(good):
+        raise ValueError(f"Row mismatch: expected {len(good)}, saved {saved}")
+    report["rows_out"] = int(saved)
+    print(report)
+    return report
+
 with DAG(
     dag_id="flight_price_pipeline",
     start_date=datetime(2026, 1, 1),
     schedule=None,
     catchup=False,
+    max_active_runs=1,
 ) as dag:
 
     ingest = PythonOperator(
         task_id="ingest_csv_to_mysql",
         python_callable=ingest_csv_to_mysql,
     )   
+    validate = PythonOperator(
+        task_id="validate_data",
+        python_callable=validate_data,
+    )
+
+    ingest >> validate
