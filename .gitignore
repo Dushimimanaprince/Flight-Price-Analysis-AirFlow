@@ -1,0 +1,15 @@
+# virtual environment
+venv/
+
+# Airflow runtime files (config holds the DB password)
+airflow/airflow.cfg
+airflow/logs/
+airflow/*.generated
+airflow/*.pid
+
+# data
+data/*.csv
+
+# python
+__pycache__/
+*.pyc
