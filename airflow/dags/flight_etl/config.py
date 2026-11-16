@@ -16,11 +16,13 @@ from sqlalchemy.types import Numeric
 # Source file
 # ---------------------------------------------------------------------------
 
-# Path to the raw Kaggle CSV. Override with the FLIGHT_CSV_PATH environment
-# variable when the project lives somewhere other than ~/flight-pipeline.
+# Path to the raw Kaggle CSV. By default it is the data/ folder in the project
+# root (three folders above this file). Override with the FLIGHT_CSV_PATH
+# environment variable to keep the file somewhere else.
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 CSV_PATH = os.environ.get(
     "FLIGHT_CSV_PATH",
-    os.path.expanduser("~/flight-pipeline/data/Flight_Price_Dataset_of_Bangladesh.csv"),
+    os.path.join(_PROJECT_ROOT, "data", "Flight_Price_Dataset_of_Bangladesh.csv"),
 )
 
 # ---------------------------------------------------------------------------
