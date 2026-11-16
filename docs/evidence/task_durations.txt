@@ -1,0 +1,9 @@
+       task_id       |  state  | seconds 
+---------------------+---------+---------
+ load_to_postgres    | success |    49.8
+ compute_kpis        | success |     1.7
+ transform_data      | success |    34.5
+ validate_data       | success |    32.6
+ ingest_csv_to_mysql | success |    27.8
+(5 rows)
+

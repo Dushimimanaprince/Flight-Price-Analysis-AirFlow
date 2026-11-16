@@ -139,7 +139,7 @@ source venv/bin/activate
 airflow standalone
 ```
 
-`airflow standalone` prints the admin username and password on first start; they are also saved in `airflow/simple_auth_manager_passwords.json.generated`. Open the address it shows (normally http://localhost:8080), find the DAG **flight_price_pipeline**, and press the trigger button. A full run takes about 1 to 2 minutes. The DAG has no schedule; it runs only when triggered.
+`airflow standalone` prints the admin username and password on first start; they are also saved in `airflow/simple_auth_manager_passwords.json.generated`. Open the address it shows (normally http://localhost:8080), find the DAG **flight_price_pipeline**, and press the trigger button. A full run takes about 2 to 3 minutes. The DAG has no schedule; it runs only when triggered.
 
 ## Verifying the results
 

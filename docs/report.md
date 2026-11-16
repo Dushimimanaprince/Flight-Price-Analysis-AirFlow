@@ -18,7 +18,7 @@ The source file contains 57,000 bookings and 17 columns: airline, source and des
 | PostgreSQL (`airflow_db`) | Airflow's own metadata database |
 | Python, pandas, SQLAlchemy | Data processing and database access |
 
-Airflow runs on WSL (Windows Subsystem for Linux), limited to 4 GB of memory, with `airflow standalone` and the LocalExecutor. Docker was not used because of the memory limit of the development machine. Using PostgreSQL for the Airflow metadata, instead of the default SQLite, is what allows tasks to run under the LocalExecutor.
+Airflow runs directly on Ubuntu-based Linux (Zorin OS) with `airflow standalone` and the LocalExecutor. Docker was not used: the project was first developed on WSL limited to 4 GB of memory, where the usual Docker-based setup did not fit, and the same direct installation was kept on the final machine. Using PostgreSQL for the Airflow metadata, instead of the default SQLite, is what allows tasks to run under the LocalExecutor.
 
 ### 2.2 Data flow
 
@@ -86,7 +86,7 @@ The validation task implements the checks required by the project brief.
 
 Text fields are trimmed, and airport codes are converted to upper case before checking. A row that fails several checks is counted once under each of them.
 
-On this dataset no row was dropped. The only finding is 2,522 rows (4.4%) whose total fare is higher than base fare plus tax, by 445 to 93,000 BDT (about 15,400 on average). Those rows are marked with `total_fare_mismatch = 1` and their total fare is kept unchanged; the reasoning is in section 8.
+On this dataset no row was dropped. The only finding is 2,522 rows (4.4%) whose total fare is higher than base fare plus tax, by 445 to 93,165 BDT (about 15,400 on average). Those rows are marked with `total_fare_mismatch = 1` and their total fare is kept unchanged; the reasoning is in section 8.
 
 ## 5. KPIs
 
@@ -126,9 +126,9 @@ Taken together, peak-season bookings average 81,570 BDT against 68,077 BDT for n
 
 The goal is minimal latency and data consistency during the transfer.
 
-**Consistency.** The five tables are written inside a single transaction. After each table, the row count in PostgreSQL is compared with the count read from MySQL, and a mismatch raises an error. If any table fails, the transaction is rolled back and PostgreSQL keeps the previous complete data. The analytics database therefore never holds a mix of old and new tables. This was tested against a real PostgreSQL server by forcing a failure after the first table was written: the table kept its old 57,000 rows.
+**Consistency.** The five tables are written inside a single transaction. After each table, the row count in PostgreSQL is compared with the count read from MySQL, and a mismatch raises an error. If any table fails, the transaction is rolled back and PostgreSQL keeps the previous complete data. The analytics database therefore never holds a mix of old and new tables. 
 
-**Latency.** Rows are sent as multi-row INSERT statements. The batch size is computed per table so that a statement never exceeds the 65,535 bound-parameter limit of the PostgreSQL driver: the 20-column enriched table uses 3,276 rows per statement and the narrow KPI tables use 5,000. In a test run against a PostgreSQL server, loading the 57,000-row enriched table took about 20 seconds. Fare columns are created as `NUMERIC(12,2)` so that money values are not stored as floating-point numbers.
+**Latency.** Rows are sent as multi-row INSERT statements. The batch size is computed per table so that a statement never exceeds the 65,535 bound-parameter limit of the PostgreSQL driver: the 20-column enriched table uses 3,276 rows per statement and the narrow KPI tables use 5,000. In the latest run on the final machine, the whole `load_to_postgres` task, which writes all five tables, took about 50 seconds (see `docs/evidence/task_durations.txt`). Fare columns are created as `NUMERIC(12,2)` so that money values are not stored as floating-point numbers.
 
 After a run, the same row counts and the same sum of `total_fare` (4,048,728,023.05) were verified in both MySQL and PostgreSQL.
 
@@ -152,15 +152,15 @@ flight-pipeline/
 └── requirements.txt
 ```
 
-Each task module separates the pure data logic (`read_flight_csv`, `clean_flights`, `enrich_flights`, `calculate_kpis`) from the function that talks to the database and Airflow. The logic can therefore be read and tried on a small DataFrame without any running database. Every module and function has a docstring describing its arguments, return value and errors. Credentials are never in the code: databases are reached through the Airflow connections `mysql_staging` and `postgres_analytics`, and `airflow.cfg` is excluded from version control.
+Each task module separates the pure data logic (`read_flight_csv`, `clean_flights`, `enrich_flights`, `calculate_kpis`) from the function that talks to the database and Airflow. The logic can therefore be read and tried on a small DataFrame without any running database. Every module and function has a comment or docstring explaining what it does. Credentials are never in the code: databases are reached through the Airflow connections `mysql_staging` and `postgres_analytics`, and `airflow.cfg` is excluded from version control.
 
 ## 8. Challenges and How They Were Resolved
 
-**Limited memory, no Docker.** The usual Docker-based Airflow setup did not fit in the development machine's memory. Airflow was installed directly on WSL, capped at 4 GB, using `airflow standalone` with the LocalExecutor and a PostgreSQL metadata database. The dataset is small enough (57,000 rows) for the tasks to work in memory with pandas.
+**Limited memory, no Docker.** The usual Docker-based Airflow setup did not fit in the memory of the first development machine (WSL, capped at 4 GB). Airflow was installed directly instead, using `airflow standalone` with the LocalExecutor and a PostgreSQL metadata database, and the project later moved to a Linux PC with the same setup. The dataset is small enough (57,000 rows) for the tasks to work in memory with pandas.
 
 **PostgreSQL parameter limit.** The final task failed with `number of parameters must be between 0 and 65535`. The enriched table has 20 columns, and a 5,000-row INSERT binds 100,000 values, more than the driver allows in one statement. The fix is a small function that divides the limit by the number of columns of each table to choose a safe batch size. It also keeps working if columns are added later.
 
-**False total-fare corrections.** The first version of the validation recomputed the total fare and reported 7,551 corrections. Investigation showed two different things mixed together. About 5,000 of those rows differed only by rounding: MySQL stores each fare with two decimals, so base fare plus tax can differ from the total by up to 0.015 BDT, which the original 0.01 tolerance did not allow. The other 2,522 rows are real differences, all of them between 445 and 93,000 BDT, with nothing between 0.02 and 445. Because they are always higher than base plus tax and appear in all three travel classes, they look like a genuine extra charge, not data errors. Overwriting them would have changed the data and lowered every airline's average fare by 0.7% to 1.2%. The solution was to raise the tolerance to 0.05 BDT, keep the original totals, and mark the 2,522 rows with a `total_fare_mismatch` flag, so analysts can include or exclude them.
+**False total-fare corrections.** The first version of the validation recomputed the total fare and reported 7,551 corrections. Investigation showed two different things mixed together. About 5,000 of those rows differed only by rounding: MySQL stores each fare with two decimals, so base fare plus tax can differ from the total by up to 0.015 BDT, which the original 0.01 tolerance did not allow. The other 2,522 rows are real differences, all of them between 445 and 93,165 BDT, with nothing between 0.02 and 445. Because they are always higher than base plus tax and appear in all three travel classes, they look like a genuine extra charge, not data errors. Overwriting them would have changed the data and lowered every airline's average fare by 0.7% to 1.2%. The solution was to raise the tolerance to 0.05 BDT, keep the original totals, and mark the 2,522 rows with a `total_fare_mismatch` flag, so analysts can include or exclude them.
 
 **A validation check that could never fire.** The "required columns exist" check ran on the staging table, which always has the full set of columns, so a CSV with a missing column would have crashed earlier with an unclear key error. A header check was added to the ingestion step, which now stops with a message listing the missing columns before anything is written to MySQL. Extra columns in the file are ignored.
 
@@ -178,4 +178,4 @@ Each task module separates the pure data logic (`read_flight_csv`, `clean_flight
 
 ## 10. Limitations and Possible Improvements
 
-The load into PostgreSQL uses batched INSERT statements. PostgreSQL's native `COPY` command would be considerably faster and is the first step if the data grows. The KPIs are computed in pandas after reading the whole enriched table, which is fine for 57,000 rows; for much larger data they could be computed with SQL `GROUP BY` queries inside the database. The pipeline has no automated tests and no failure alerts (for example an e-mail on a failed task), and it runs only when triggered; a schedule can be added if new files arrive regularly. Finally, each run rebuilds the tables completely; keeping history across runs would need a run identifier column and an append strategy.
+The load into PostgreSQL uses batched INSERT statements. PostgreSQL's native `COPY` command would be considerably faster and is the first step if the data grows. The KPIs are computed in pandas after reading the whole enriched table, which is fine for 57,000 rows; for much larger data they could be computed with SQL `GROUP BY` queries inside the database. The pipeline has 16 unit tests, which cover the validation rules, the CSV header check and the PostgreSQL batch size rule but not the transform, KPI or load logic. It also has no failure alerts (for example an e-mail on a failed task), and it runs only when triggered; a schedule can be added if new files arrive regularly. Finally, each run rebuilds the tables completely; keeping history across runs would need a run identifier column and an append strategy.
