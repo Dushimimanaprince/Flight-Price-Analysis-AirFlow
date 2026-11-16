@@ -2,6 +2,7 @@
 # The staging table is a faithful copy of the file. Nothing is cleaned here;
 # that is the job of the validation task.
 
+import logging
 import pandas as pd
 from airflow.providers.mysql.hooks.mysql import MySqlHook
 
@@ -14,6 +15,9 @@ from flight_etl.config import (
 )
 from flight_etl.db import write_dataframe
 from flight_etl.schema import CREATE_STAGING_SQL
+
+
+logger = logging.getLogger(__name__)
 
 
 def read_flight_csv(path: str) -> pd.DataFrame:
@@ -46,6 +50,8 @@ def ingest_csv_to_mysql() -> int:
     hook.run(f"DROP TABLE IF EXISTS {STAGING_TABLE}")
     hook.run(CREATE_STAGING_SQL)
 
-    return write_dataframe(
+    rows = write_dataframe(
         df, STAGING_TABLE, hook.get_sqlalchemy_engine(), MYSQL_CHUNKSIZE
     )
+    logger.info("Loaded %s rows into %s", rows, STAGING_TABLE)
+    return rows

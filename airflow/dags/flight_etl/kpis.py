@@ -8,6 +8,7 @@ Four KPI tables are calculated from the enriched flights and stored in MySQL:
 * most popular routes
 """
 
+import logging
 from typing import Dict
 
 import pandas as pd
@@ -20,6 +21,9 @@ from flight_etl.config import (
     TOP_ROUTES_LIMIT,
 )
 from flight_etl.db import write_dataframe
+
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_kpis(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
@@ -118,5 +122,5 @@ def compute_kpis() -> dict:
         for name, frame in calculate_kpis(df).items()
     }
 
-    print(report)
+    logger.info("KPI report: %s", report)
     return report

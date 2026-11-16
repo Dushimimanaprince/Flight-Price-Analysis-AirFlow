@@ -6,6 +6,7 @@ missing. The result is written to its own table so the validated data stays
 untouched.
 """
 
+import logging
 import pandas as pd
 from airflow.providers.mysql.hooks.mysql import MySqlHook
 
@@ -19,6 +20,9 @@ from flight_etl.config import (
 )
 from flight_etl.db import write_dataframe
 from flight_etl.schema import ADD_ENRICHED_COLUMNS_SQL_TEMPLATE
+
+
+logger = logging.getLogger(__name__)
 
 
 def enrich_flights(df: pd.DataFrame) -> pd.DataFrame:
@@ -84,5 +88,5 @@ def transform_data() -> dict:
         "peak": int((df["season_type"] == "Peak").sum()),
         "non_peak": int((df["season_type"] == "Non-Peak").sum()),
     }
-    print(report)
+    logger.info("Transform report: %s", report)
     return report

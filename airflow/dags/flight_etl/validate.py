@@ -2,6 +2,7 @@
 # Reads stg_flights, drops unusable rows, flags total fare mismatches,
 # and writes the result to validated_flights. The staging table is never changed.
 
+import logging
 from typing import Tuple
 
 import pandas as pd
@@ -22,6 +23,9 @@ from flight_etl.schema import ADD_VALIDATED_FLAG_SQL_TEMPLATE
 # Allowed gap (in BDT) between total_fare and base_fare + tax_surcharge.
 # MySQL rounding alone can cause up to 0.015, so 0.05 leaves a safe margin.
 TOTAL_FARE_TOLERANCE = 0.05
+
+
+logger = logging.getLogger(__name__)
 
 
 def clean_flights(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
@@ -86,5 +90,5 @@ def validate_data() -> dict:
         good, VALIDATED_TABLE, hook.get_sqlalchemy_engine(), MYSQL_CHUNKSIZE
     )
 
-    print(report)
+    logger.info("Validation report: %s", report)
     return report

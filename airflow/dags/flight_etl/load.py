@@ -5,6 +5,7 @@ database. All tables are written inside one transaction, so PostgreSQL ends up
 with either the complete new data or the complete old data, never a mix.
 """
 
+import logging
 from airflow.providers.mysql.hooks.mysql import MySqlHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
@@ -20,6 +21,9 @@ from flight_etl.db import write_dataframe
 # The PostgreSQL driver (psycopg 3) rejects a single statement that carries
 # more than this many bound values.
 POSTGRES_MAX_PARAMETERS = 65535
+
+
+logger = logging.getLogger(__name__)
 
 
 def safe_chunksize(n_columns: int, max_rows: int = POSTGRES_CHUNKSIZE) -> int:
@@ -70,5 +74,5 @@ def load_to_postgres() -> dict:
                 dtype=dtype,
             )
 
-    print(report)
+    logger.info("Load report: %s", report)
     return report
