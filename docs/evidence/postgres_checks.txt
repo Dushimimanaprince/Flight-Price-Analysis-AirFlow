@@ -1,0 +1,23 @@
+                      List of relations
+ Schema |             Name             | Type  |    Owner     
+--------+------------------------------+-------+--------------
+ public | enriched_flights             | table | airflow_user
+ public | kpi_avg_fare_by_airline      | table | airflow_user
+ public | kpi_booking_count_by_airline | table | airflow_user
+ public | kpi_popular_routes           | table | airflow_user
+ public | kpi_seasonal_fare_variation  | table | airflow_user
+(5 rows)
+
+ enriched_rows 
+---------------
+         57000
+(1 row)
+
+ season_type |   seasonality   | avg_total_fare | booking_count | pct_vs_non_peak 
+-------------+-----------------+----------------+---------------+-----------------
+ Non-Peak    | Regular         |       68077.27 |         44525 |               0
+ Peak        | Eid             |       91560.02 |           603 |           34.49
+ Peak        | Hajj            |       97144.47 |           942 |            42.7
+ Peak        | Winter Holidays |       79676.74 |         10930 |           17.04
+(4 rows)
+

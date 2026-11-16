@@ -1,0 +1,28 @@
++-------------------+-----------+
+| tbl               | row_count |
++-------------------+-----------+
+| stg_flights       |     57000 |
+| validated_flights |     57000 |
+| enriched_flights  |     57000 |
++-------------------+-----------+
++--------------+
+| flagged_rows |
++--------------+
+|         2522 |
++--------------+
++------------------+
+| total_fare_sum   |
++------------------+
+| 4,048,728,023.05 |
++------------------+
++------------------------------+
+| Tables_in_flight_staging     |
++------------------------------+
+| enriched_flights             |
+| kpi_avg_fare_by_airline      |
+| kpi_booking_count_by_airline |
+| kpi_popular_routes           |
+| kpi_seasonal_fare_variation  |
+| stg_flights                  |
+| validated_flights            |
++------------------------------+
