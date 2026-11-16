@@ -35,7 +35,7 @@ DEFAULT_ARGS = {
 with DAG(
     dag_id="flight_price_pipeline",
     start_date=datetime(2026, 1, 1),
-    schedule=None,      # run on demand (manual trigger)
+    schedule="@daily",       # run daily
     catchup=False,      # no backfill of past intervals
     max_active_runs=1,  # never let two runs overwrite the same tables at once
     default_args=DEFAULT_ARGS,
