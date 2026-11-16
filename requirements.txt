@@ -6,3 +6,4 @@ mysqlclient==2.3.0
 pandas==3.1.0
 psycopg==3.3.6
 SQLAlchemy==2.0.55
+pytest==9.2.0
