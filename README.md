@@ -31,12 +31,12 @@ For the full design, task descriptions, KPI logic and the problems solved along 
 
 ## Tech stack
 
-Apache Airflow 3 (LocalExecutor), MySQL (staging), PostgreSQL (analytics and Airflow metadata), Python with pandas and SQLAlchemy. Developed on WSL with Airflow run through `airflow standalone`, without Docker.
+Apache Airflow 3 (LocalExecutor), MySQL (staging), PostgreSQL (analytics and Airflow metadata), Python with pandas and SQLAlchemy, pytest for the tests. Developed on Ubuntu-based Linux with Airflow run through `airflow standalone`, without Docker.
 
 ## Project structure
 
 ```
-flight-pipeline/
+Flight-Price-Analysis-AirFlow/
 ├── airflow/
 │   └── dags/
 │       ├── flight_price_pipeline.py   DAG: tasks and their order
@@ -51,6 +51,9 @@ flight-pipeline/
 │           └── load.py                task 5
 ├── data/                              put the CSV here (not committed)
 ├── docs/report.md                     full project report
+├── docs/evidence/                     proof of a successful run
+├── tests/                             unit tests (pytest)
+├── pytest.ini                         pytest settings
 ├── requirements.txt
 └── README.md
 ```
@@ -67,7 +70,7 @@ flight-pipeline/
 ### 1. Install the dependencies
 
 ```bash
-cd flight-pipeline
+cd Flight-Price-Analysis-AirFlow
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -121,7 +124,7 @@ You can also create them in the web interface under **Admin → Connections**. T
 
 ### 5. Add the data
 
-Copy the CSV to `data/Flight_Price_Dataset_of_Bangladesh.csv`. If the project is not in `~/flight-pipeline`, tell the pipeline where the file is:
+Copy the CSV to `data/Flight_Price_Dataset_of_Bangladesh.csv` inside the project folder; the pipeline finds it there automatically. To keep the file somewhere else, tell the pipeline where it is:
 
 ```bash
 export FLIGHT_CSV_PATH="/full/path/to/Flight_Price_Dataset_of_Bangladesh.csv"
@@ -136,7 +139,7 @@ source venv/bin/activate
 airflow standalone
 ```
 
-`airflow standalone` prints the admin username and password on first start; they are also saved in `airflow/simple_auth_manager_passwords.json.generated`. Open the address it shows (normally http://localhost:8080), find the DAG **flight_price_pipeline**, and press the trigger button. A full run takes a few minutes. The DAG has no schedule; it runs only when triggered.
+`airflow standalone` prints the admin username and password on first start; they are also saved in `airflow/simple_auth_manager_passwords.json.generated`. Open the address it shows (normally http://localhost:8080), find the DAG **flight_price_pipeline**, and press the trigger button. A full run takes about 1 to 2 minutes. The DAG has no schedule; it runs only when triggered.
 
 ## Verifying the results
 
@@ -164,7 +167,19 @@ With the original dataset you should see:
 - **Idempotent tasks.** Each task drops and recreates its output tables, so re-running or retrying never duplicates rows. Tasks are retried twice, and `max_active_runs=1` stops two runs from overwriting the same tables.
 - **Verified loads.** Every write compares the table's row count with the data that was sent, and the PostgreSQL load is a single all-or-nothing transaction.
 - **Flag, don't overwrite.** 2,522 bookings have a total fare higher than base fare plus tax (by 445 to 93,000 BDT). These look like real extra charges, so they are kept as they are and marked with `total_fare_mismatch = 1` instead of being "corrected".
-- **Docstrings everywhere.** Every module and function documents its purpose, arguments, return value and errors.
+- **Documented code.** Every module and function has a comment or docstring that explains what it does.
+- **Tests and logging.** 16 unit tests cover the validation rules, the CSV header check and the PostgreSQL batch size rule. Each task writes its report through Python logging, so it appears in that task's log in Airflow.
+- **Run evidence.** Screenshots, database checks, test output and the `validate_data` task log from a successful run are in `docs/evidence/`.
+
+## Running the tests
+
+The unit tests need no database and no running Airflow. With the virtual environment active, run this from the project root:
+
+```bash
+pytest -v
+```
+
+All 16 tests should pass.
 
 ## Troubleshooting
 
