@@ -1,10 +1,6 @@
-"""Task 2: validate and clean the staged data.
-
-Reads the raw staging table, drops rows that are unusable, corrects the total
-fare where it disagrees with base fare + tax, and writes the result to a
-separate table. The staging table is never modified, so a bad rule here can be
-fixed and re-run without re-ingesting the CSV.
-"""
+# Task 2: validate and clean the staged data.
+# Reads stg_flights, drops unusable rows, flags total fare mismatches,
+# and writes the result to validated_flights. The staging table is never changed.
 
 from typing import Tuple
 
@@ -21,37 +17,16 @@ from flight_etl.config import (
     VALIDATED_TABLE,
 )
 from flight_etl.db import write_dataframe
+from flight_etl.schema import ADD_VALIDATED_FLAG_SQL_TEMPLATE
 
-# A stored total fare may differ from base + tax by up to this many BDT before
-# it is treated as wrong.
-TOTAL_FARE_TOLERANCE = 0.01
+# Allowed gap (in BDT) between total_fare and base_fare + tax_surcharge.
+# MySQL rounding alone can cause up to 0.015, so 0.05 leaves a safe margin.
+TOTAL_FARE_TOLERANCE = 0.05
 
 
 def clean_flights(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
-    """Validate a staged flights DataFrame and return only the good rows.
-
-    Steps, in order:
-        1. Check that every required column exists.
-        2. Convert fares and duration to numbers, trim text, upper-case the
-           airport codes.
-        3. Drop rows with missing values, negative fares, or invalid airport
-           codes (not three letters, or source equal to destination).
-        4. Recompute ``total_fare`` as base fare + tax wherever the stored
-           value is further than ``TOTAL_FARE_TOLERANCE`` away from it.
-
-    Kept free of database code so it can be unit tested with a small DataFrame.
-
-    Args:
-        df: Raw rows from the staging table.
-
-    Returns:
-        A tuple ``(good_rows, report)``. ``report`` counts the rows read, the
-        rows dropped for each reason, and the total fares corrected. A row
-        that fails several checks is counted under each of them.
-
-    Raises:
-        ValueError: If a required column is missing.
-    """
+    # Takes the raw rows, returns (good_rows, report).
+    # No database code here, so it is easy to test with a small DataFrame.
     report = {"rows_in": len(df)}
 
     # 1. required columns must exist
@@ -68,7 +43,7 @@ def clean_flights(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
     df["source"] = df["source"].str.upper()
     df["destination"] = df["destination"].str.upper()
 
-    # 3. find bad rows
+    # 3. find bad rows (a row failing several checks is counted under each)
     missing_mask = (
         df[TEXT_COLS + FARE_COLS].isna().any(axis=1) | (df[TEXT_COLS] == "").any(axis=1)
     )
@@ -85,36 +60,28 @@ def clean_flights(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
 
     good = df[~bad_mask].copy()
 
-    # 4. correct total fare where it does not equal base fare + tax
-    expected = (good["base_fare"] + good["tax_surcharge"]).round(2)
+    # 4. flag (do not overwrite) totals that differ from base fare + tax
+    # a gap can be a real extra charge, so we keep the original value
+    expected = good["base_fare"] + good["tax_surcharge"]
     mismatch = (good["total_fare"] - expected).abs() > TOTAL_FARE_TOLERANCE
-    report["total_fare_corrected"] = int(mismatch.sum())
-    good.loc[mismatch, "total_fare"] = expected[mismatch]
+    good["total_fare_mismatch"] = mismatch.astype("int64")
+    report["total_fare_flagged"] = int(mismatch.sum())
 
     return good, report
 
 
 def validate_data() -> dict:
-    """Airflow task: clean the staging table into ``validated_flights``.
-
-    The destination table is dropped and recreated on every run, with the same
-    structure as the staging table.
-
-    Returns:
-        The validation report from ``clean_flights`` plus ``rows_out``, the
-        number of rows saved (pushed to XCom).
-
-    Raises:
-        ValueError: If a required column is missing, or the saved row count
-            differs from the number of good rows.
-    """
+    # Airflow task: clean stg_flights into validated_flights.
+    # The report is returned so Airflow stores it in XCom.
     hook = MySqlHook(mysql_conn_id=MYSQL_CONN_ID)
     df = hook.get_df(f"SELECT * FROM {STAGING_TABLE}")
 
     good, report = clean_flights(df)
 
+    # drop and recreate so re-running always gives the same result
     hook.run(f"DROP TABLE IF EXISTS {VALIDATED_TABLE}")
     hook.run(f"CREATE TABLE {VALIDATED_TABLE} LIKE {STAGING_TABLE}")
+    hook.run(ADD_VALIDATED_FLAG_SQL_TEMPLATE.format(table=VALIDATED_TABLE))
     report["rows_out"] = write_dataframe(
         good, VALIDATED_TABLE, hook.get_sqlalchemy_engine(), MYSQL_CHUNKSIZE
     )
